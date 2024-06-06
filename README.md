@@ -10,15 +10,13 @@ Artsy rain and haikus in your terminal.
 git clone https://github.com/patrickarmengol/namida.git
 cd namida
 go build
-./namida
+./namida -fps 60 -raindropRate 1 -linger 400 -cooldown 400
 ```
 
 ## Todo
 
 -   accept user specified haiku files
--   allow configuration of things like raindrop speed, raindrop creation rate, linger time
 -   allow multiple haikus to be up at once
--   clean up anchoring
 -   clean up error handling
 -   maybe put it up on the aur
 -   colors???

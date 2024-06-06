@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"math/rand/v2"
 	"os"
@@ -11,13 +12,19 @@ import (
 
 const JPSPC = '　'
 
+type options struct {
+	fps            uint
+	lingerFrames   uint
+	cooldownFrames uint
+	raindropRate   uint
+}
+
 var (
-	width      int
-	height     int
-	tickLength = time.Second / 30
-	defStyle   = tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
-	textStyle  = tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorWhite)
-	dropStyle  = tcell.StyleDefault.Background(tcell.ColorWhite).Foreground(tcell.ColorWhite)
+	width     int
+	height    int
+	defStyle  = tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorReset)
+	textStyle = tcell.StyleDefault.Background(tcell.ColorReset).Foreground(tcell.ColorWhite)
+	dropStyle = tcell.StyleDefault.Background(tcell.ColorWhite).Foreground(tcell.ColorWhite)
 )
 
 func watchEvents(s tcell.Screen, quit chan<- struct{}, pause chan<- struct{}, resume chan<- struct{}) {
@@ -35,7 +42,7 @@ func watchEvents(s tcell.Screen, quit chan<- struct{}, pause chan<- struct{}, re
 		case *tcell.EventResize:
 			s.Sync()
 			width, height = ev.Size()
-			if width < 50 || height < 30 {
+			if width < 30 || height < 30 {
 				pause <- struct{}{}
 			} else {
 				resume <- struct{}{}
@@ -49,11 +56,12 @@ type cell struct {
 	row int
 }
 
-func runSim(s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume <-chan struct{}, hss []string) {
-	t := time.NewTicker(tickLength)
+func runSim(opts options, s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume <-chan struct{}, hss []string) {
+	t := time.NewTicker(time.Second / time.Duration(opts.fps))
 	running := false
 
 	ds := []drop{}
+	var countBetweenDrops uint = 0
 
 	hai := newHaiku(hss[rand.IntN(len(hss))], randomAnchorPos(width, height))
 
@@ -75,7 +83,7 @@ func runSim(s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume 
 				// logic
 
 				// update haiku state machine
-				hai.updateState()
+				hai.updateState(opts)
 				if hai.state == "done" {
 					hai = newHaiku(hss[rand.IntN(len(hss))], randomAnchorPos(width, height))
 				}
@@ -87,9 +95,13 @@ func runSim(s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume 
 				}
 
 				// create new drop
-				c := rand.IntN(width)
-				c = c - (c % 2) // skip odd columns
-				ds = append(ds, drop{cell{c, -1}, false})
+				countBetweenDrops++
+				if countBetweenDrops >= opts.raindropRate {
+					countBetweenDrops -= opts.raindropRate
+					c := rand.IntN(width)
+					c = c - (c % 2) // skip odd columns
+					ds = append(ds, drop{cell{c, -1}, false})
+				}
 				// step all drops and filter out finished
 				newds := []drop{}
 				for _, d := range ds {
@@ -121,6 +133,13 @@ func runSim(s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume 
 }
 
 func main() {
+	opts := options{}
+	flag.UintVar(&opts.fps, "fps", 30, "frames per second")
+	flag.UintVar(&opts.lingerFrames, "linger", 400, "frames to let haiku linger")
+	flag.UintVar(&opts.cooldownFrames, "cooldown", 400, "frames to wait between haikus")
+	flag.UintVar(&opts.raindropRate, "raindropRate", 1, "frames per raindrop")
+	flag.Parse()
+
 	// initialize tcell screen
 	screen, err := tcell.NewScreen()
 	if err != nil {
@@ -163,5 +182,5 @@ func main() {
 	resume := make(chan struct{})
 
 	go watchEvents(screen, quit, pause, resume)
-	runSim(screen, quit, pause, resume, hss)
+	runSim(opts, screen, quit, pause, resume, hss)
 }

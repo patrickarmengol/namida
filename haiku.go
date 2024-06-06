@@ -18,7 +18,7 @@ type haiku struct {
 	letterVis map[cell]struct{} // hashset
 
 	state string // new, linger, erase, cooldown, done
-	steps int
+	steps uint
 }
 
 func (h *haiku) isVisible() bool {
@@ -29,7 +29,7 @@ func (h *haiku) isFullyVisible() bool {
 	return len(h.letterVis) == len(h.letters)
 }
 
-func (h *haiku) updateState() {
+func (h *haiku) updateState(opts options) {
 	switch h.state {
 	case "new":
 		if h.isFullyVisible() {
@@ -38,7 +38,7 @@ func (h *haiku) updateState() {
 		// case default:
 		//     h.state = "done"
 	case "linger":
-		if h.steps > 400 {
+		if h.steps > opts.lingerFrames {
 			h.state = "erase"
 		} else {
 			h.steps++
@@ -49,7 +49,7 @@ func (h *haiku) updateState() {
 			h.steps = 0
 		}
 	case "cooldown":
-		if h.steps > 400 {
+		if h.steps > opts.cooldownFrames {
 			h.state = "done"
 		} else {
 			h.steps++
@@ -109,7 +109,7 @@ func parseHaikuStrings(hf string) ([]string, error) {
 
 func randomAnchorPos(w int, h int) cell {
 	margin := 4
-	minCol := margin + 40
+	minCol := margin + 16
 	maxCol := w - margin
 	minRow := margin
 	maxRow := h - margin - 20
