@@ -1,20 +1,13 @@
 package main
 
 import (
-	_ "embed"
-	"errors"
 	"fmt"
-	"math/rand"
+	"math/rand/v2"
 	"os"
-	"strings"
 	"time"
-	"unicode/utf8"
 
 	"github.com/gdamore/tcell/v2"
 )
-
-//go:embed haikus.txt
-var haikusFile string
 
 const JPSPC = '　'
 
@@ -42,7 +35,7 @@ func watchEvents(s tcell.Screen, quit chan<- struct{}, pause chan<- struct{}, re
 		case *tcell.EventResize:
 			s.Sync()
 			width, height = ev.Size()
-			if width < 40 || height < 20 {
+			if width < 50 || height < 30 {
 				pause <- struct{}{}
 			} else {
 				resume <- struct{}{}
@@ -51,136 +44,9 @@ func watchEvents(s tcell.Screen, quit chan<- struct{}, pause chan<- struct{}, re
 	}
 }
 
-type drop struct {
-	col  int
-	row  int
-	done bool
-}
-
-func (d *drop) step() {
-	if d.row >= height {
-		d.done = true
-	}
-	d.row++
-}
-
-type line struct {
-	col    int
-	start  int // row index
-	length int
-	phrase string
-	vis    bool
-}
-
-type haiku struct {
-	lines [4]*line
-	state string // new, visisible, erasing
-	steps int
-}
-
-func (h haiku) hasCol(col int) bool {
-	for _, l := range h.lines {
-		if l.col == col {
-			return true
-		}
-	}
-	return false
-}
-
-func (h haiku) isVis() bool {
-	for _, l := range h.lines {
-		if !l.vis {
-			return false
-		}
-	}
-	return true
-}
-
-func (h haiku) isClear() bool {
-	for _, l := range h.lines {
-		if l.vis {
-			return false
-		}
-	}
-	return true
-}
-
-func randomAnchorPos(w int, h int) (int, int) {
-	margin := 4
-	col := rand.Intn(w-(40-2*margin)) + margin + (40 - 2*margin)
-	col = col - (col % 2)
-	row := rand.Intn(h-(20-2*margin)) + margin
-	return col, row
-}
-
-func newHaiku(haikuString string) haiku {
-	haikuLines := strings.Split(haikuString, "\n")
-	if len(haikuLines) != 4 {
-		// panic since this should have been checked in parsing
-		panic(fmt.Errorf("haiku doesn't have 4 lines: %v %d", haikuLines, len(haikuLines)))
-	}
-
-	anchorCol, anchorRow := randomAnchorPos(width, height)
-
-	return haiku{
-		lines: [4]*line{
-			{anchorCol, anchorRow, utf8.RuneCountInString(haikuLines[0]), haikuLines[0], false},
-			{anchorCol - 4, anchorRow + 1, utf8.RuneCountInString(haikuLines[1]), haikuLines[1], false},
-			{anchorCol - 8, anchorRow + 2, utf8.RuneCountInString(haikuLines[2]), haikuLines[2], false},
-			{anchorCol - 16, anchorRow + 3, utf8.RuneCountInString(haikuLines[3]), haikuLines[3], false},
-		},
-		state: "new",
-	}
-}
-
-func parseHaikuStrings(hf string) ([]string, error) {
-	if len(hf) == 0 {
-		return nil, errors.New("haiku file empty")
-	}
-
-	fullHaikus := strings.Split(strings.TrimSpace(hf), "\n\n")
-	if len(fullHaikus) == 1 {
-		return nil, errors.New("could only find 1 haiku; delimited by 2 newlines")
-	}
-
-	for _, h := range fullHaikus {
-		haikuLines := strings.Split(h, "\n")
-		if len(haikuLines) != 4 {
-			return nil, fmt.Errorf("haiku doesn't have 4 lines: %v %d", haikuLines, len(haikuLines))
-		}
-	}
-	return fullHaikus, nil
-}
-
-func intersect(h haiku, col int, row int) (rune, bool) {
-	for _, l := range h.lines {
-		if col == l.col {
-			diff := row - l.start
-			if diff >= 0 && diff < l.length {
-				var r rune
-				if h.state == "erasing" || h.state == "erased" {
-					r = JPSPC
-					if diff == 0 {
-						l.vis = false
-					}
-				} else {
-					r = []rune(l.phrase)[diff]
-					if diff == 0 {
-						l.vis = true
-					}
-				}
-				return r, true
-			}
-			return JPSPC, false
-		}
-	}
-	return JPSPC, false
-}
-
-type letter struct {
-	col  int
-	row  int
-	char rune
+type cell struct {
+	col int
+	row int
 }
 
 func runSim(s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume <-chan struct{}, hss []string) {
@@ -189,7 +55,7 @@ func runSim(s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume 
 
 	ds := []drop{}
 
-	hai := newHaiku(hss[rand.Intn(len(hss))])
+	hai := newHaiku(hss[rand.IntN(len(hss))], randomAnchorPos(width, height))
 
 	for {
 		select {
@@ -201,50 +67,29 @@ func runSim(s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume 
 			}
 		case <-resume:
 			ds = []drop{}
-			hai = newHaiku(hss[rand.Intn(len(hss))])
+			hai = newHaiku(hss[rand.IntN(len(hss))], randomAnchorPos(width, height))
 			s.Clear()
 			running = true
 		case <-t.C:
 			if running {
-
 				// logic
 
 				// update haiku state machine
-				if hai.state == "new" && hai.isVis() {
-					hai.state = "visible"
-				} else if hai.state == "visible" {
-					if hai.steps > 400 {
-						hai.state = "erasing"
-					} else {
-						hai.steps++
-					}
-				} else if hai.state == "erasing" {
-					if hai.isClear() {
-						hai.state = "erased"
-					}
-				} else if hai.state == "erased" {
-					if hai.steps > 800 {
-						hai = newHaiku(hss[rand.Intn(len(hss))])
-					} else {
-						hai.steps++
-					}
+				hai.updateState()
+				if hai.state == "done" {
+					hai = newHaiku(hss[rand.IntN(len(hss))], randomAnchorPos(width, height))
 				}
 
 				// check existing drop positions intersect haiku letters
-				toFlip := []letter{}
+				toFlip := map[cell]rune{}
 				for _, d := range ds {
-					r, ok := intersect(hai, d.col, d.row)
-					if ok {
-						toFlip = append(toFlip, letter{d.col, d.row, r})
-					} else {
-						toFlip = append(toFlip, letter{d.col, d.row, JPSPC})
-					}
+					toFlip[d.pos] = intersect(hai, d)
 				}
 
 				// create new drop
-				c := rand.Intn(width)
+				c := rand.IntN(width)
 				c = c - (c % 2) // skip odd columns
-				ds = append(ds, drop{c, -1, false})
+				ds = append(ds, drop{cell{c, -1}, false})
 				// step all drops and filter out finished
 				newds := []drop{}
 				for _, d := range ds {
@@ -257,14 +102,15 @@ func runSim(s tcell.Screen, quit <-chan struct{}, pause <-chan struct{}, resume 
 
 				// render
 
-				// render drops
+				// render changed characters
+				for ce, ch := range toFlip {
+					s.SetContent(ce.col, ce.row, ch, nil, textStyle)
+				}
+
+				// render drops; should overwrite / be drawn over characters
 				for _, d := range ds {
 					// set drop tile
-					s.SetContent(d.col, d.row, JPSPC, nil, dropStyle)
-				}
-				// render changed characters
-				for _, l := range toFlip {
-					s.SetContent(l.col, l.row, l.char, nil, textStyle)
+					s.SetContent(d.pos.col, d.pos.row, JPSPC, nil, dropStyle)
 				}
 
 				// update display
